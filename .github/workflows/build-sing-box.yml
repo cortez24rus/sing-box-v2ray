@@ -6,10 +6,10 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * *'  # ежедневно в полночь UTC
+    - cron: '0 0 * * *'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.build }}
   cancel-in-progress: true
 
 jobs:
@@ -19,12 +19,11 @@ jobs:
     outputs:
       version: ${{ steps.set_version.outputs.version }}
     steps:
-      - name: Checkout SagerNet/sing-box (fetch all tags)
+      - name: Checkout SagerNet/sing-box
         uses: actions/checkout@v4
         with:
           repository: SagerNet/sing-box
-          ref: main
-          fetch-depth: 0    # чтобы git describe смог найти теги
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -35,15 +34,13 @@ jobs:
         id: get_tag
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 | sed 's/^v*//')
+          echo "version=$LATEST_TAG" >> "$GITHUB_ENV"
           echo "Latest tag: $LATEST_TAG"
-          # Устанавливаем output этого шага
-          echo "version=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set outputs
         id: set_version
         run: |
-          # Читаем версию из предыдущего шага
-          echo "version=${{ steps.get_tag.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build binary
@@ -52,29 +49,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: linux,   arch: amd64, runner: ubuntu-latest }
-          - { os: linux,   arch: "386", go386: softfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: "386", go386: sse2, runner: ubuntu-latest }
-          - { os: linux,   arch: arm64, runner: ubuntu-latest }
-          - { os: linux,   arch: arm,   goarm: "7", runner: ubuntu-latest }
-          - { os: linux,   arch: mips,   goarch_extra: softfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: mips64, goarch_extra: softfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: mips64le, goarch_extra: hardfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: ppc64le, runner: ubuntu-latest }
-          - { os: linux,   arch: s390x,   runner: ubuntu-latest }
-          - { os: linux,   arch: riscv64, runner: ubuntu-latest }
+          - { os: linux, arch: amd64, runner: ubuntu-latest }
+          - { os: linux, arch: "386", go386: softfloat, runner: ubuntu-latest }
+          - { os: linux, arch: "386", go386: sse2, runner: ubuntu-latest }
+          - { os: linux, arch: arm64, runner: ubuntu-latest }
+          - { os: linux, arch: arm, goarm: "7", runner: ubuntu-latest }
+          - { os: linux, arch: mips, goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux, arch: mips64, goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux, arch: mips64le, goarch_extra: hardfloat, runner: ubuntu-latest }
+          - { os: linux, arch: ppc64le, runner: ubuntu-latest }
+          - { os: linux, arch: s390x, runner: ubuntu-latest }
+          - { os: linux, arch: riscv64, runner: ubuntu-latest }
           - { os: windows, arch: amd64, runner: windows-latest }
           - { os: windows, arch: "386", runner: windows-latest }
           - { os: windows, arch: arm64, runner: windows-latest }
-          - { os: darwin,  arch: amd64, runner: macos-latest }
-          - { os: darwin,  arch: arm64, runner: macos-latest }
+          - { os: darwin, arch: amd64, runner: macos-latest }
+          - { os: darwin, arch: arm64, runner: macos-latest }
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout SagerNet/sing-box
         uses: actions/checkout@v4
         with:
           repository: SagerNet/sing-box
-          ref: main
           fetch-depth: 0
 
       - name: Setup Go
@@ -82,8 +78,7 @@ jobs:
         with:
           go-version: '1.24.x'
 
-      - name: Initialize go.mod if missing (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Initialize go.mod if missing
         shell: bash
         run: |
           if [ ! -f go.mod ]; then
@@ -93,7 +88,7 @@ jobs:
           fi
 
       - name: Initialize go.mod if missing (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.os == 'windows'
         shell: powershell
         run: |
           if (-not (Test-Path go.mod)) {
@@ -102,12 +97,12 @@ jobs:
             go mod tidy
           }
 
-      - name: Cache Go modules and build cache
+      - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.GOCACHE }}
-            ${{ env.GOMODCACHE }}
+            ~/.cache/go-build
+            ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -115,24 +110,21 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Build sing-box (Linux / macOS)
-        if: matrix.os != 'windows'
-        shell: bash
+      - name: Build sing-box
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
           BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
           mkdir -p artifacts
-          GOOS=${{ matrix.os }} \
-          GOARCH=${{ matrix.arch }} \
-          GOARM=${{ matrix.goarm }} \
-          GO386=${{ matrix.go386 }} \
-          GOMIPS=${{ matrix.goarch_extra }} \
-          GOMIPS64=${{ matrix.goarch_extra }} \
-          CGO_ENABLED=0 \
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
+          GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
             go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
             -o "./artifacts/$BINARY_NAME" ./cmd/sing-box
+        shell: bash {0}
 
       - name: Build sing-box (Windows)
         if: matrix.os == 'windows'
@@ -142,18 +134,13 @@ jobs:
           $VERSION="${{ needs.calculate_version.outputs.version }}"
           $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}.exe"
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $env:GOOS = "${{ matrix.os }}"
-          $env:GOARCH = "${{ matrix.arch }}"
-          if ("${{ matrix.goarm }}" -ne "")  { $env:GOARM = "${{ matrix.goarm }}" }
-          if ("${{ matrix.go386 }}" -ne "")  { $env:GO386 = "${{ matrix.go386 }}" }
-          if ("${{ matrix.goarch_extra }}" -ne "") { 
-            $env:GOMIPS   = "${{ matrix.goarch_extra }}"; 
-            $env:GOMIPS64 = "${{ matrix.goarch_extra }}" 
-          }
-          $env:CGO_ENABLED = "0"
-          go build -v -trimpath -tags "$TAGS" `
-            -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" `
-            -o "./artifacts/$BINARY_NAME" ./cmd/sing-box
+          $env:GOOS="${{ matrix.os }}"
+          $env:GOARCH="${{ matrix.arch }}"
+          if ("${{ matrix.goarm }}" -ne "") { $env:GOARM="${{ matrix.goarm }}" }
+          if ("${{ matrix.go386 }}" -ne "") { $env:GO386="${{ matrix.go386 }}" }
+          if ("${{ matrix.goarch_extra }}" -ne "") { $env:GOMIPS="${{ matrix.goarch_extra }}"; $env:GOMIPS64="${{ matrix.goarch_extra }}" }
+          $env:CGO_ENABLED="0"
+          go build -v -trimpath -tags "$TAGS" -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" -o "./artifacts/$BINARY_NAME" ./cmd/sing-box
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -183,7 +170,7 @@ jobs:
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
           name: ${{ needs.calculate_version.outputs.version }}
-          files: artifacts/*      # <-- здесь мы берём сразу всё из artifacts/
+          files: artifacts/*/*
           fail_on_unmatched_files: true
           replace: true
         env:
