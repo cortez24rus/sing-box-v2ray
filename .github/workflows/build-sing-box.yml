@@ -114,28 +114,57 @@ jobs:
             go mod tidy
           }
 
+      - name: Ensure GOMODCACHE directory exists
+        run: |
+          GOMODCACHE=$(/opt/hostedtoolcache/go/1.24.4/x64/bin/go env GOMODCACHE)
+          mkdir -p $GOMODCACHE
+        shell: bash {0}
+
+      - name: Ensure GOMODCACHE directory exists (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $GOMODCACHE = (go env GOMODCACHE)
+          if (-not (Test-Path $GOMODCACHE)) {
+            New-Item -ItemType Directory -Path $GOMODCACHE | Out-Null
+          }
+
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: ${{ runner.os }}-go-${{ matrix.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-
+            ${{ runner.os }}-go-${{ matrix.os }}-
 
       - name: Download dependencies
         run: go mod download
+
+      - name: Clean artifacts directory
+        run: |
+          rm -rf artifacts || true
+          mkdir -p artifacts
+        shell: bash {0}
+
+      - name: Clean artifacts directory (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          if (Test-Path artifacts) {
+            Remove-Item -Recurse -Force artifacts
+          }
+          New-Item -ItemType Directory -Path artifacts | Out-Null
 
       - name: Build sing-box
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
-          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.goarm || matrix.go386 || matrix.goarch_extra || 'default' }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
-          mkdir -p artifacts
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
           GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
             go build -v -trimpath -tags "$TAGS" \
@@ -149,8 +178,7 @@ jobs:
         run: |
           $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           $VERSION="${{ needs.calculate_version.outputs.version }}"
-          $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}.exe"
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.goarm || matrix.go386 || matrix.goarch_extra || 'default' }}.exe"
           $env:GOOS="${{ matrix.os }}"
           $env:GOARCH="${{ matrix.arch }}"
           if ("${{ matrix.goarm }}" -ne "") { $env:GOARM="${{ matrix.goarm }}" }
@@ -189,6 +217,6 @@ jobs:
           name: sing-box v${{ needs.calculate_version.outputs.version }}
           files: artifacts/*/*
           fail_on_unmatched_files: true
-          replace: true  # Заменять существующие активы
+          replace: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
