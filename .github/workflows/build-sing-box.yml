@@ -7,11 +7,14 @@ on:
 
 jobs:
   check-and-build:
+    permissions:
+      contents: write  # Необходимые права для создания релиза
     runs-on: ubuntu-latest
     strategy:
       matrix:
         goos: [linux]
         goarch: [amd64, arm64]
+      fail-fast: false
     steps:
       - name: Create log directory
         run: |
@@ -74,6 +77,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
 
+      - name: Verify build artifacts
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          ls -l sing-box_linux_amd64 || echo "$(date): Ошибка: Файл sing-box_linux_amd64 не найден" >> /tmp/sing-box-builds/sing-box-builds.log
+          ls -l sing-box_linux_arm64 || echo "$(date): Ошибка: Файл sing-box_linux_arm64 не найден" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "$(date): Проверка артефактов завершена" >> /tmp/sing-box-builds/sing-box-builds.log
+
       - name: Create release
         if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
@@ -83,6 +93,7 @@ jobs:
           files: |
             sing-box_linux_amd64
             sing-box_linux_arm64
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
