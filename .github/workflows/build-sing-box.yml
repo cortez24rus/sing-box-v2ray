@@ -156,7 +156,7 @@ jobs:
     needs: [calculate_version, build]
     permissions:
       contents: write
-    runs αφ-on: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
