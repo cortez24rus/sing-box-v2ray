@@ -1,70 +1,163 @@
 name: Build and Release sing-box
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # Запуск каждый день в 00:00 UTC
-  workflow_dispatch:    # Возможность ручного запуска
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version name"
+        required: true
+        type: string
+      build:
+        description: "Build type"
+        required: true
+        type: choice
+        default: "All"
+        options:
+          - All
+          - Binary
+          - Android
+  push:
+    branches:
+      - main-next
+      - dev-next
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.build }}
+  cancel-in-progress: true
 
 jobs:
-  get-tag:
+  calculate_version:
+    name: Calculate version
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.get_tag.outputs.tag }}
+      version: ${{ steps.outputs.outputs.version }}
     steps:
-      - name: Get latest tag from SagerNet/sing-box
-        id: get_tag
-        run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Получен тег: $LATEST_TAG"
-
-  build:
-    needs: get-tag
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]  # Параллельная сборка для amd64 и arm64
-    steps:
-      - name: Checkout SagerNet/sing-box
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: SagerNet/sing-box
-          ref: ${{ needs.get-tag.outputs.tag }}
-
-      - name: Set up Go
+          fetch-depth: 0
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '^1.24.3'
+      - name: Check input version
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "version=${{ inputs.version }}" >> "$GITHUB_ENV"
+      - name: Calculate version
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          go run -v ./cmd/internal/read_tag --ci --nightly
+      - name: Set outputs
+        id: outputs
+        run: |
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build binary
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
+    needs: calculate_version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: "386", go386: sse2 }
+          - { os: linux, arch: "386", go386: softfloat }
+          - { os: linux, arch: arm64 }
+          - { os: linux, arch: arm, goarm: "5" }
+          - { os: linux, arch: arm, goarm: "6" }
+          - { os: linux, arch: arm, goarm: "7" }
+          - { os: linux, arch: mips, gomips: softfloat }
+          - { os: linux, arch: mipsle, gomips: hardfloat }
+          - { os: linux, arch: mips64, gomips: softfloat }
+          - { os: linux, arch: mips64le, gomips: hardfloat }
+          - { os: linux, arch: s390x }
+          - { os: linux, arch: ppc64le }
+          - { os: linux, arch: riscv64 }
+          - { os: linux, arch: loong64 }
+
+          # Windows
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: "386" }
+          - { os: windows, arch: arm64 }
+
+          # macOS
+          - { os: darwin, arch: amd64 }
+          - { os: darwin, arch: arm64 }
+
+          # Android
+          - { os: android, arch: arm64, ndk: "aarch64-linux-android21" }
+          - { os: android, arch: arm, ndk: "armv7a-linux-androideabi21" }
+          - { os: android, arch: amd64, ndk: "x86_64-linux-android21" }
+          - { os: android, arch: "386", ndk: "i686-linux-android21" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.24.3'
+
+      - name: Setup Android NDK
+        if: matrix.os == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28
+          local-cache: true
 
       - name: Download dependencies
         run: |
           go mod download
           echo "Зависимости загружены"
 
-      - name: Build sing-box for ${{ matrix.arch }}
+      - name: Build sing-box for ${{ matrix.os }}/${{ matrix.arch }} (non-Android)
+        if: matrix.os != 'android'
         run: |
-          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ needs.get-tag.outputs.tag }}"
-          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
+          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
+          VERSION="${{ needs.calculate_version.outputs.version }}"
+          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} GOMIPS=${{ matrix.gomips }} CGO_ENABLED=0 \
+            go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o sing-box_linux_${{ matrix.arch }} ./cmd/sing-box
-          echo "Собран sing-box_linux_${{ matrix.arch }}"
+            -o $BINARY_NAME ./cmd/sing-box
+          echo "Собран $BINARY_NAME"
+
+      - name: Build sing-box for Android
+        if: matrix.os == 'android'
+        run: |
+          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
+          VERSION="${{ needs.calculate_version.outputs.version }}"
+          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          export CC="${{ matrix.ndk }}-clang"
+          export CXX="${CC}++"
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=1 \
+            go build -v -trimpath -tags "$TAGS" \
+            -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
+            -o $BINARY_NAME ./cmd/sing-box
+          echo "Собран $BINARY_NAME"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sing-box_linux_${{ matrix.arch }}
-          path: sing-box_linux_${{ matrix.arch }}
+          name: ${{ matrix.os }}_${{ matrix.arch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}${{ matrix.go386 && format('_{0}', matrix.go386) || '' }}${{ matrix.gomips && format('_{0}', matrix.gomips) || '' }}
+          path: sing-box_${{ matrix.os }}_${{ matrix.arch }}*
 
   release:
-    needs: [get-tag, build]
+    name: Create Release
+    needs: [calculate_version, build]
     permissions:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -72,11 +165,10 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.get-tag.outputs.tag }}
-          name: sing-box ${{ needs.get-tag.outputs.tag }}
+          tag_name: v${{ needs.calculate_version.outputs.version }}
+          name: sing-box v${{ needs.calculate_version.outputs.version }}
           files: |
-            artifacts/sing-box_linux_amd64/sing-box_linux_amd64
-            artifacts/sing-box_linux_arm64/sing-box_linux_arm64
+            artifacts/*/*
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
