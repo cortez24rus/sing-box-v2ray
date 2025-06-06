@@ -1,61 +1,82 @@
-name: Build sing-box
+name: Build and Release sing-box
 
 on:
-  workflow_dispatch:    # Ручной запуск
   schedule:
-    - cron: '0 0 * * *' # Каждый день в 00:00 UTC
+    - cron: '0 0 * * *'  # Запуск каждый день в 00:00 UTC
+  workflow_dispatch:    # Возможность ручного запуска
 
 jobs:
   build-and-release:
     permissions:
-      contents: write
+      contents: write  # Права для создания релизов
     runs-on: ubuntu-latest
     steps:
+      - name: Get latest tag from SagerNet/sing-box
+        id: get_tag
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "Получен тег: $LATEST_TAG"
+
+      - name: Check if tag exists in current repo
+        id: check_tag
+        run: |
+          TAG_EXISTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases | \
+            jq -r ".[] | select(.tag_name == \"${{ env.LATEST_TAG }}\") | .tag_name")
+          if [ -n "$TAG_EXISTS" ]; then
+            echo "Тег ${{ env.LATEST_TAG }} уже существует, пропускаем сборку"
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "Тег ${{ env.LATEST_TAG }} не найден, начинаем сборку"
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
+
       - name: Checkout SagerNet/sing-box
+        if: env.TAG_EXISTS == 'false'
         uses: actions/checkout@v4
         with:
           repository: SagerNet/sing-box
-          ref: ${{ github.event.inputs.version || 'main' }} # Используйте тег или ветку
+          ref: ${{ env.LATEST_TAG }}
 
       - name: Set up Go
+        if: env.TAG_EXISTS == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '^1.24.3'
 
       - name: Download dependencies
+        if: env.TAG_EXISTS == 'false'
         run: |
           go mod download
           echo "Зависимости загружены"
 
       - name: Build sing-box for amd64
+        if: env.TAG_EXISTS == 'false'
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ github.event.inputs.version || 'dev' }}-custom"
+          VERSION="${{ env.LATEST_TAG }}"
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
             -o sing-box_linux_amd64 ./cmd/sing-box
           echo "Собран sing-box_linux_amd64"
 
       - name: Build sing-box for arm64
+        if: env.TAG_EXISTS == 'false'
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ github.event.inputs.version || 'dev' }}-custom"
+          VERSION="${{ env.LATEST_TAG }}"
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
             -o sing-box_linux_arm64 ./cmd/sing-box
           echo "Собран sing-box_linux_arm64"
 
-      - name: Verify build artifacts
-        run: |
-          ls -l sing-box_linux_amd64 || echo "Ошибка: Файл sing-box_linux_amd64 не найден"
-          ls -l sing-box_linux_arm64 || echo "Ошибка: Файл sing-box_linux_arm64 не найден"
-          echo "Проверка артефактов завершена"
-
       - name: Create release
+        if: env.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version || 'nightly' }}
-          name: sing-box ${{ github.event.inputs.version || 'nightly' }}
+          tag_name: ${{ env.LATEST_TAG }}
+          name: sing-box ${{ env.LATEST_TAG }}
           files: |
             sing-box_linux_amd64
             sing-box_linux_arm64
