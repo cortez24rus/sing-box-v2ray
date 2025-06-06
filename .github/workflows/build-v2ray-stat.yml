@@ -1,4 +1,3 @@
-```yaml
 name: Check and Build v2ray-stat
 
 on:
@@ -125,4 +124,3 @@ jobs:
           echo "$(date): Completed workflow run" >> /tmp/v2ray-stat-builds/v2ray-stat-builds.log
           echo >> /tmp/v2ray-stat-builds/v2ray-stat-builds.log
           cat /tmp/v2ray-stat-builds/v2ray-stat-builds.log >> ${{ github.workspace }}/v2ray-stat-builds.log
-```
