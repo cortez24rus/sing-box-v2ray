@@ -32,7 +32,7 @@ jobs:
       - name: Get latest tag
         id: get_tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0)
+          LATEST_TAG=$(git describe --tags --abbrev=0 | sed 's/^v*//')  # Удаляем префикс v
           echo "version=$LATEST_TAG" >> "$GITHUB_ENV"
           echo "Latest tag: $LATEST_TAG"
 
@@ -97,28 +97,74 @@ jobs:
             go mod tidy
           }
 
+      - name: Ensure GOMODCACHE directory exists
+        run: |
+          GOMODCACHE=$(/opt/hostedtoolcache/go/1.24.4/x64/bin/go env GOMODCACHE)
+          mkdir -p $GOMODCACHE
+        shell: bash {0}
+
+      - name: Ensure GOMODCACHE directory exists (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $GOMODCACHE = (go env GOMODCACHE)
+          if (-not (Test-Path $GOMODCACHE)) {
+            New-Item -ItemType Directory -Path $GOMODCACHE | Out-Null
+          }
+
+      - name: Clean cache directories
+        run: |
+          rm -rf ~/.cache/go-build ~/go/pkg/mod || true
+          mkdir -p ~/.cache/go-build ~/go/pkg/mod
+        shell: bash {0}
+
+      - name: Clean cache directories (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $GOCACHE = (go env GOCACHE)
+          $GOMODCACHE = (go env GOMODCACHE)
+          if (Test-Path $GOCACHE) { Remove-Item -Recurse -Force $GOCACHE }
+          if (Test-Path $GOMODCACHE) { Remove-Item -Recurse -Force $GOMODCACHE }
+          New-Item -ItemType Directory -Path $GOCACHE | Out-Null
+          New-Item -ItemType Directory -Path $GOMODCACHE | Out-Null
+
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: ${{ runner.os }}-go-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.goarm || matrix.go386 || matrix.goarch_extra || 'default' }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-
+            ${{ runner.os }}-go-${{ matrix.os }}-${{ matrix.arch }}-
 
       - name: Download dependencies
         run: go mod download
+
+      - name: Clean artifacts directory
+        run: |
+          rm -rf artifacts || true
+          mkdir -p artifacts
+        shell: bash {0}
+
+      - name: Clean artifacts directory (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          if (Test-Path artifacts) {
+            Remove-Item -Recurse -Force artifacts
+          }
+          New-Item -ItemType Directory -Path artifacts | Out-Null
 
       - name: Build sing-box
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
-          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.goarm || matrix.go386 || matrix.goarch_extra || 'default' }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
-          mkdir -p artifacts
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
           GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
             go build -v -trimpath -tags "$TAGS" \
@@ -132,8 +178,7 @@ jobs:
         run: |
           $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           $VERSION="${{ needs.calculate_version.outputs.version }}"
-          $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}.exe"
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.goarm || matrix.go386 || matrix.goarch_extra || 'default' }}.exe"
           $env:GOOS="${{ matrix.os }}"
           $env:GOARCH="${{ matrix.arch }}"
           if ("${{ matrix.goarm }}" -ne "") { $env:GOARM="${{ matrix.goarm }}" }
@@ -169,7 +214,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
-          name: sing-box v${{ needs.calculate_version.outputs.version }}
+          name: ${{ needs.calculate_version.outputs.version }}
           files: artifacts/*/*
           fail_on_unmatched_files: true
           replace: true
