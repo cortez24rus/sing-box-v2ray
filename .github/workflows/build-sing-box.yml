@@ -51,10 +51,8 @@ jobs:
       - name: Calculate version (если не workflow_dispatch)
         if: github.event_name != 'workflow_dispatch'
         run: |
-          # здесь ваш скрипт, который выводит версию в stdout; например:
-          cd sing-box
+          # Пример: скрипт, который внутри проекта вычисляет версию:
           go run ./cmd/internal/read_tag --ci --nightly > calculated.txt
-          cat calculated.txt
           echo "version=$(cat calculated.txt)" >> "$GITHUB_ENV"
 
       - name: Set outputs
@@ -81,7 +79,6 @@ jobs:
           - { os: linux,   arch: ppc64le, runner: ubuntu-latest }
           - { os: linux,   arch: s390x,   runner: ubuntu-latest }
           - { os: linux,   arch: riscv64, runner: ubuntu-latest }
-          # … (добавьте остальные архитектуры по аналогии)
           - { os: windows, arch: amd64,   runner: windows-latest }
           - { os: windows, arch: 386,     runner: windows-latest }
           - { os: windows, arch: arm64,   runner: windows-latest }
@@ -95,7 +92,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
-        working-directory: ./sing-box
+        # Убираем "./sing-box" — go.mod лежит в корне
+        working-directory: .
 
     steps:
       - name: Checkout
@@ -108,21 +106,25 @@ jobs:
         with:
           go-version: '1.24.x'
 
+      - name: Cache Go modules 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.modcache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Get project dependencies
+        run: go mod download
+
       - name: Setup Android NDK (для Android)
         if: matrix.os == 'android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r28
           local-cache: true
-
-      - name: Generate go.sum if missing
-        run: |
-          if [ ! -f go.sum ]; then
-            go mod tidy
-          fi
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Build sing-box (не-Android)
         if: matrix.os != 'android'
