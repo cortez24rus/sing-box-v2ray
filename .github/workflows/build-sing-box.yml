@@ -171,6 +171,5 @@ jobs:
           name: ${{ needs.calculate_version.outputs.version }}
           files: artifacts/*/*
           fail_on_unmatched_files: true
-          replace: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
