@@ -6,80 +6,77 @@ on:
   workflow_dispatch:    # Возможность ручного запуска
 
 jobs:
-  build-and-release:
-    permissions:
-      contents: write  # Права для создания релизов
+  get-tag:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get_tag.outputs.tag }}
     steps:
       - name: Get latest tag from SagerNet/sing-box
         id: get_tag
         run: |
           LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
-          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "Получен тег: $LATEST_TAG"
 
-      - name: Check if tag exists in current repo
-        id: check_tag
-        run: |
-          TAG_EXISTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/${{ github.repository }}/releases | \
-            jq -r ".[] | select(.tag_name == \"${{ env.LATEST_TAG }}\") | .tag_name")
-          if [ -n "$TAG_EXISTS" ]; then
-            echo "Тег ${{ env.LATEST_TAG }} уже существует, пропускаем сборку"
-            echo "TAG_EXISTS=true" >> $GITHUB_ENV
-          else
-            echo "Тег ${{ env.LATEST_TAG }} не найден, начинаем сборку"
-            echo "TAG_EXISTS=false" >> $GITHUB_ENV
-          fi
-
+  build:
+    needs: get-tag
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]  # Параллельная сборка для amd64 и arm64
+    steps:
       - name: Checkout SagerNet/sing-box
-        if: env.TAG_EXISTS == 'false'
         uses: actions/checkout@v4
         with:
           repository: SagerNet/sing-box
-          ref: ${{ env.LATEST_TAG }}
+          ref: ${{ needs.get-tag.outputs.tag }}
 
       - name: Set up Go
-        if: env.TAG_EXISTS == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '^1.24.3'
 
       - name: Download dependencies
-        if: env.TAG_EXISTS == 'false'
         run: |
           go mod download
           echo "Зависимости загружены"
 
-      - name: Build sing-box for amd64
-        if: env.TAG_EXISTS == 'false'
+      - name: Build sing-box for ${{ matrix.arch }}
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ env.LATEST_TAG }}"
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
+          VERSION="${{ needs.get-tag.outputs.tag }}"
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o sing-box_linux_amd64 ./cmd/sing-box
-          echo "Собран sing-box_linux_amd64"
+            -o sing-box_linux_${{ matrix.arch }} ./cmd/sing-box
+          echo "Собран sing-box_linux_${{ matrix.arch }}"
 
-      - name: Build sing-box for arm64
-        if: env.TAG_EXISTS == 'false'
-        run: |
-          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ env.LATEST_TAG }}"
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
-            -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o sing-box_linux_arm64 ./cmd/sing-box
-          echo "Собран sing-box_linux_arm64"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-box_linux_${{ matrix.arch }}
+          path: sing-box_linux_${{ matrix.arch }}
+
+  release:
+    needs: [get-tag, build]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Create release
-        if: env.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.LATEST_TAG }}
-          name: sing-box ${{ env.LATEST_TAG }}
+          tag_name: ${{ needs.get-tag.outputs.tag }}
+          name: sing-box ${{ needs.get-tag.outputs.tag }}
           files: |
-            sing-box_linux_amd64
-            sing-box_linux_arm64
+            artifacts/sing-box_linux_amd64/sing-box_linux_amd64
+            artifacts/sing-box_linux_arm64/sing-box_linux_arm64
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
