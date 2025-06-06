@@ -1,3 +1,4 @@
+```yaml
 name: Check and Build v2ray-stat
 
 on:
@@ -112,6 +113,9 @@ jobs:
           name: v2ray-stat ${{ steps.get_tag.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log release creation
+        if: steps.check_tag.outputs.exists == 'false'
         run: |
           echo "$(date): Created release for tag ${{ steps.get_tag.outputs.tag }}" >> /tmp/v2ray-stat-builds/v2ray-stat-builds.log
 
@@ -121,3 +125,4 @@ jobs:
           echo "$(date): Completed workflow run" >> /tmp/v2ray-stat-builds/v2ray-stat-builds.log
           echo >> /tmp/v2ray-stat-builds/v2ray-stat-builds.log
           cat /tmp/v2ray-stat-builds/v2ray-stat-builds.log >> ${{ github.workspace }}/v2ray-stat-builds.log
+```
