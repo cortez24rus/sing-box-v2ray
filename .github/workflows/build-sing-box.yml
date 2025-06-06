@@ -1,105 +1,64 @@
-name: Build sing-box with custom tags
+name: Build sing-box
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # Запуск каждый день в 00:00 UTC
   workflow_dispatch:    # Ручной запуск
+  schedule:
+    - cron: '0 0 * * *' # Каждый день в 00:00 UTC
 
 jobs:
-  check-and-build:
+  build-and-release:
     permissions:
-      contents: write  # Необходимые права для создания релиза
+      contents: write
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux]
-        goarch: [amd64, arm64]
-      fail-fast: false
     steps:
-      - name: Create log directory
-        run: |
-          mkdir -p /tmp/sing-box-builds
-          echo "$(date): Начинаем проверку новых тегов sing-box" >> /tmp/sing-box-builds/sing-box-builds.log
-
-      - name: Get latest tag from SagerNet/sing-box
-        id: get_tag
-        run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
-          echo "Последний тег: $LATEST_TAG" >> /tmp/sing-box-builds/sing-box-builds.log
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
-      - name: Check if tag exists in current repo
-        id: check_tag
-        run: |
-          TAG_EXISTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/${{ github.repository }}/releases | \
-            jq -r ".[] | select(.tag_name == \"${{ steps.get_tag.outputs.tag }}\") | .tag_name")
-          if [ -n "$TAG_EXISTS" ]; then
-            echo "Тег ${{ steps.get_tag.outputs.tag }} уже существует" >> /tmp/sing-box-builds/sing-box-builds.log
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Найден новый тег ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Clone SagerNet/sing-box
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          git clone --depth 1 --branch ${{ steps.get_tag.outputs.tag }} https://github.com/SagerNet/sing-box.git
-          echo "$(date): Клонирован SagerNet/sing-box с тегом ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
+      - name: Checkout SagerNet/sing-box
+        uses: actions/checkout@v4
+        with:
+          repository: SagerNet/sing-box
+          ref: ${{ github.event.inputs.version || 'main' }} # Используйте тег или ветку
 
       - name: Set up Go
-        if: steps.check_tag.outputs.exists == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '^1.24.3'
-          cache: true
-          cache-dependency-path: sing-box/go.sum
 
       - name: Download dependencies
-        if: steps.check_tag.outputs.exists == 'false'
         run: |
-          cd sing-box
           go mod download
-          echo "$(date): Зависимости загружены" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "Зависимости загружены"
 
-      - name: Build sing-box
-        if: steps.check_tag.outputs.exists == 'false'
+      - name: Build sing-box for amd64
         run: |
-          cd sing-box
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
-          VERSION="${{ steps.get_tag.outputs.tag }}-for-A-zuro"
-          BINARY_NAME="sing-box_${{ matrix.goos }}_${{ matrix.goarch }}"
-          go build -v -trimpath -tags "$TAGS" -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" -o "../$BINARY_NAME" ./cmd/sing-box
-          echo "$(date): Собран $BINARY_NAME для тега ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          VERSION="${{ github.event.inputs.version || 'dev' }}-custom"
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
+            -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
+            -o sing-box_linux_amd64 ./cmd/sing-box
+          echo "Собран sing-box_linux_amd64"
+
+      - name: Build sing-box for arm64
+        run: |
+          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
+          VERSION="${{ github.event.inputs.version || 'dev' }}-custom"
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -tags "$TAGS" \
+            -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
+            -o sing-box_linux_arm64 ./cmd/sing-box
+          echo "Собран sing-box_linux_arm64"
 
       - name: Verify build artifacts
-        if: steps.check_tag.outputs.exists == 'false'
         run: |
-          ls -l sing-box_linux_amd64 || echo "$(date): Ошибка: Файл sing-box_linux_amd64 не найден" >> /tmp/sing-box-builds/sing-box-builds.log
-          ls -l sing-box_linux_arm64 || echo "$(date): Ошибка: Файл sing-box_linux_arm64 не найден" >> /tmp/sing-box-builds/sing-box-builds.log
-          echo "$(date): Проверка артефактов завершена" >> /tmp/sing-box-builds/sing-box-builds.log
+          ls -l sing-box_linux_amd64 || echo "Ошибка: Файл sing-box_linux_amd64 не найден"
+          ls -l sing-box_linux_arm64 || echo "Ошибка: Файл sing-box_linux_arm64 не найден"
+          echo "Проверка артефактов завершена"
 
       - name: Create release
-        if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
-          name: sing-box ${{ steps.get_tag.outputs.tag }}
+          tag_name: ${{ github.event.inputs.version || 'nightly' }}
+          name: sing-box ${{ github.event.inputs.version || 'nightly' }}
           files: |
             sing-box_linux_amd64
             sing-box_linux_arm64
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Save logs
-        if: always()
-        run: |
-          echo "$(date): Завершён запуск воркфлоу" >> /tmp/sing-box-builds/sing-box-builds.log
-          echo >> /tmp/sing-box-builds/sing-box-builds.log
-          cat /tmp/sing-box-builds/sing-box-builds.log >> ${{ github.workspace }}/sing-box-builds.log
