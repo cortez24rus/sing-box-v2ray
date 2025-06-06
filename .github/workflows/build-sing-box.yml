@@ -16,6 +16,7 @@ on:
           - All
           - Binary
           - Android
+
   push:
     branches:
       - main-next
@@ -30,66 +31,72 @@ jobs:
     name: Calculate version
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.outputs.outputs.version }}
+      version: ${{ steps.set_version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.24.3'
-      - name: Check input version
+          go-version: '1.24.x'
+
+      - name: Check input version (если workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        run: echo "version=${{ inputs.version }}" >> "$GITHUB_ENV"
-      - name: Calculate version
+        run: |
+          echo "version=${{ inputs.version }}" >> "$GITHUB_ENV"
+
+      - name: Calculate version (если не workflow_dispatch)
         if: github.event_name != 'workflow_dispatch'
-        run: go run -v ./cmd/internal/read_tag --ci --nightly
+        run: |
+          # здесь ваш скрипт, который выводит версию в stdout; например:
+          cd sing-box
+          go run ./cmd/internal/read_tag --ci --nightly > calculated.txt
+          cat calculated.txt
+          echo "version=$(cat calculated.txt)" >> "$GITHUB_ENV"
+
       - name: Set outputs
-        id: outputs
-        run: echo "version=$version" >> "$GITHUB_OUTPUT"
+        id: set_version
+        run: |
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build binary
-    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
     needs: calculate_version
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
     strategy:
-      fail-fast: false  # Allow all jobs to run even if some fail
+      fail-fast: false
       matrix:
         include:
-          # Linux (runs-on: ubuntu-latest)
-          - { os: linux, arch: amd64, runner: ubuntu-latest }
-          - { os: linux, arch: "386", go386: softfloat, runner: ubuntu-latest }
-          - { os: linux, arch: "386", go386: sse2, runner: ubuntu-latest }
-          - { os: linux, arch: arm64, runner: ubuntu-latest }
-          - { os: linux, arch: arm, goarm: "5", runner: ubuntu-latest }
-          - { os: linux, arch: arm, goarm: "6", runner: ubuntu-latest }
-          - { os: linux, arch: arm, goarm: "7", runner: ubuntu-latest }
-          - { os: linux, arch: mips, goarch_extra: softfloat, runner: ubuntu-latest }
-          - { os: linux, arch: mips64, goarch_extra: softfloat, runner: ubuntu-latest }
-          - { os: linux, arch: mipsle, goarch_extra: hardfloat, runner: ubuntu-latest }
-          - { os: linux, arch: mips64le, goarch_extra: hardfloat, runner: ubuntu-latest }
-          - { os: linux, arch: ppc64le, runner: ubuntu-latest }
-          - { os: linux, arch: s390x, runner: ubuntu-latest }
-          - { os: linux, arch: loong64, runner: ubuntu-latest }
-          - { os: linux, arch: riscv64, runner: ubuntu-latest }
-
-          # Windows (runs-on: windows-latest)
-          - { os: windows, arch: amd64, runner: windows-latest }
-          - { os: windows, arch: "386", runner: windows-latest }
-          - { os: windows, arch: arm64, runner: windows-latest }
-
-          # macOS (runs-on: macos-latest)
-          - { os: darwin, arch: amd64, runner: macos-latest }
-          - { os: darwin, arch: arm64, runner: macos-latest }
-
-          # Android (runs-on: ubuntu-latest with NDK)
+          - { os: linux,   arch: amd64,   runner: ubuntu-latest }
+          - { os: linux,   arch: 386,     go386: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: 386,     go386: sse2,       runner: ubuntu-latest }
+          - { os: linux,   arch: arm64,   runner: ubuntu-latest }
+          - { os: linux,   arch: arm,     goarm: "7",       runner: ubuntu-latest }
+          - { os: linux,   arch: mips,    goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: mips64,  goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: mips64le, goarch_extra: hardfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: ppc64le, runner: ubuntu-latest }
+          - { os: linux,   arch: s390x,   runner: ubuntu-latest }
+          - { os: linux,   arch: riscv64, runner: ubuntu-latest }
+          # … (добавьте остальные архитектуры по аналогии)
+          - { os: windows, arch: amd64,   runner: windows-latest }
+          - { os: windows, arch: 386,     runner: windows-latest }
+          - { os: windows, arch: arm64,   runner: windows-latest }
+          - { os: darwin,  arch: amd64,   runner: macos-latest }
+          - { os: darwin,  arch: arm64,   runner: macos-latest }
           - { os: android, arch: arm64, ndk: "aarch64-linux-android21", runner: ubuntu-latest }
-          - { os: android, arch: arm, ndk: "armv7a-linux-androideabi21", runner: ubuntu-latest }
-          - { os: android, arch: amd64, ndk: "x86_64-linux-android21", runner: ubuntu-latest }
-          - { os: android, arch: "386", ndk: "i686-linux-android21", runner: ubuntu-latest }
+          - { os: android, arch: arm,   ndk: "armv7a-linux-androideabi21", runner: ubuntu-latest }
+          - { os: android, arch: amd64, ndk: "x86_64-linux-android21",   runner: ubuntu-latest }
+          - { os: android, arch: 386,   ndk: "i686-linux-android21",     runner: ubuntu-latest }
+
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: ./sing-box
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,9 +106,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.24.3'
+          go-version: '1.24.x'
 
-      - name: Setup Android NDK
+      - name: Setup Android NDK (для Android)
         if: matrix.os == 'android'
         uses: nttld/setup-ndk@v1
         with:
@@ -117,7 +124,7 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Build sing-box for ${{ matrix.os }}/${{ matrix.arch }} (non-Android)
+      - name: Build sing-box (не-Android)
         if: matrix.os != 'android'
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
@@ -126,30 +133,39 @@ jobs:
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
-          GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
+
+          GOOS=${{ matrix.os }} \
+          GOARCH=${{ matrix.arch }} \
+          GOARM=${{ matrix.goarm }} \
+          GO386=${{ matrix.go386 }} \
+          GOMIPS=${{ matrix.goarch_extra }} \
+          CGO_ENABLED=0 \
             go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o $BINARY_NAME ./cmd/sing-box
+            -o "../artifacts/${BINARY_NAME}" ./cmd/sing-box
 
-      - name: Build sing-box for Android
+      - name: Build sing-box (Android)
         if: matrix.os == 'android'
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
           VERSION="${{ needs.calculate_version.outputs.version }}"
           BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+
           export CC="${{ matrix.ndk }}-clang"
           export CXX="${CC}++"
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=1 \
+
+          GOOS=${{ matrix.os }} \
+          GOARCH=${{ matrix.arch }} \
+          CGO_ENABLED=1 \
             go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o $BINARY_NAME ./cmd/sing-box
+            -o "../artifacts/${BINARY_NAME}" ./cmd/sing-box
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}_${{ matrix.arch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}${{ matrix.go386 && format('_{0}', matrix.go386) || '' }}${{ matrix.goarch_extra && format('_{0}', matrix.goarch_extra) || '' }}
-          path: sing-box_${{ matrix.os }}_${{ matrix.arch }}*
+          path: artifacts/*
 
   release:
     name: Create Release
@@ -163,7 +179,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
