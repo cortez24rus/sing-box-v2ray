@@ -129,7 +129,7 @@ jobs:
 
       - name: Build sing-box
         run: |
-          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
+          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
           BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
@@ -147,7 +147,7 @@ jobs:
         if: matrix.os == 'windows'
         shell: powershell
         run: |
-          $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
+          $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           $VERSION="${{ needs.calculate_version.outputs.version }}"
           $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}.exe"
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
@@ -177,13 +177,18 @@ jobs:
         with:
           path: artifacts
 
+      - name: Debug artifact structure
+        run: |
+          echo "Содержимое директории artifacts:"
+          ls -R artifacts
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
           name: sing-box v${{ needs.calculate_version.outputs.version }}
-          files: |
-            artifacts/*/*
+          files: artifacts/*/*
           fail_on_unmatched_files: true
+          replace: true  # Заменять существующие активы
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
