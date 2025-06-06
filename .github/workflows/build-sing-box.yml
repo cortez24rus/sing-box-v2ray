@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.set_version.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.result }} 
     steps:
       - name: Checkout SagerNet/sing-box
         uses: actions/checkout@v4
@@ -40,11 +41,39 @@ jobs:
       - name: Set outputs
         id: set_version
         run: |
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=${{ steps.get_tag.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists in THIS repo
+        id: check_tag
+        uses: actions/github-script@v6
+        with:
+          result-encoding: string
+          script: |
+            // version из предыдущего шага:
+            const version = '${{ steps.get_tag.outputs.version }}';
+            const tagName = `v${version}`;
+            try {
+              // пытаемся получить реф "refs/tags/v<version>" в текущем репозитории
+              await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tagName}`
+              });
+              // если не упало, значит такой тег уже есть
+              return 'true';
+            } catch (err) {
+              if (err.status === 404) {
+                // если 404 – значит тега нет, можно делать релиз
+                return 'false';
+              }
+              // все остальные ошибки пробрасываем дальше
+              throw err;
+            }
 
   build:
     name: Build binary
     needs: calculate_version
+    if: needs.calculate_version.outputs.tag_exists == 'false'
     strategy:
       fail-fast: false
       matrix:
