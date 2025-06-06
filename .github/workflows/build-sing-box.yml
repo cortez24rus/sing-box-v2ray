@@ -98,6 +98,7 @@ jobs:
           }
 
       - name: Cache Go modules
+        if: matrix.os != 'darwin'
         uses: actions/cache@v4
         with:
           path: |
