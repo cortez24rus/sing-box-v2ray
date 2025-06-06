@@ -47,7 +47,7 @@ jobs:
       - name: Calculate version (если не workflow_dispatch)
         if: github.event_name != 'workflow_dispatch'
         run: |
-          go run sing-box/cmd/internal/read_tag --ci --nightly > calculated.txt
+          go run ./cmd/internal/read_tag --ci --nightly > calculated.txt
           echo "version=$(cat calculated.txt)" >> "$GITHUB_ENV"
 
       - name: Set outputs
@@ -63,32 +63,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: linux,   arch: amd64,   runner: ubuntu-latest }
-          - { os: linux,   arch: 386,     go386: softfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: 386,     go386: sse2,       runner: ubuntu-latest }
-          - { os: linux,   arch: arm64,   runner: ubuntu-latest }
-          - { os: linux,   arch: arm,     goarm: "7",       runner: ubuntu-latest }
-          - { os: linux,   arch: mips,    goarch_extra: softfloat, runner: ubuntu-latest }
-          - { os: linux,   arch: mips64,  goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: amd64, runner: ubuntu-latest }
+          - { os: linux,   arch: "386", go386: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: "386", go386: sse2, runner: ubuntu-latest }
+          - { os: linux,   arch: arm64, runner: ubuntu-latest }
+          - { os: linux,   arch: arm,   goarm: "7", runner: ubuntu-latest }
+          - { os: linux,   arch: mips,  goarch_extra: softfloat, runner: ubuntu-latest }
+          - { os: linux,   arch: mips64, goarch_extra: softfloat, runner: ubuntu-latest }
           - { os: linux,   arch: mips64le, goarch_extra: hardfloat, runner: ubuntu-latest }
           - { os: linux,   arch: ppc64le, runner: ubuntu-latest }
-          - { os: linux,   arch: s390x,   runner: ubuntu-latest }
+          - { os: linux,   arch: s390x, runner: ubuntu-latest }
           - { os: linux,   arch: riscv64, runner: ubuntu-latest }
-          - { os: windows, arch: amd64,   runner: windows-latest }
-          - { os: windows, arch: 386,     runner: windows-latest }
-          - { os: windows, arch: arm64,   runner: windows-latest }
-          - { os: darwin,  arch: amd64,   runner: macos-latest }
-          - { os: darwin,  arch: arm64,   runner: macos-latest }
+          - { os: windows, arch: amd64, runner: windows-latest }
+          - { os: windows, arch: "386", runner: windows-latest }
+          - { os: windows, arch: arm64, runner: windows-latest }
+          - { os: darwin,  arch: amd64, runner: macos-latest }
+          - { os: darwin,  arch: arm64, runner: macos-latest }
           - { os: android, arch: arm64, ndk: "aarch64-linux-android21", runner: ubuntu-latest }
           - { os: android, arch: arm,   ndk: "armv7a-linux-androideabi21", runner: ubuntu-latest }
-          - { os: android, arch: amd64, ndk: "x86_64-linux-android21",   runner: ubuntu-latest }
-          - { os: android, arch: 386,   ndk: "i686-linux-android21",     runner: ubuntu-latest }
-
+          - { os: android, arch: amd64, ndk: "x86_64-linux-android21", runner: ubuntu-latest }
+          - { os: android, arch: "386", ndk: "i686-linux-android21", runner: ubuntu-latest }
     runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        # Указываем, что go.mod находится в папке sing-box
-        working-directory: sing-box
 
     steps:
       - name: Checkout
@@ -107,15 +102,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/.modcache
-          # Ключ берётся по сумме файлов sing-box/go.sum
-          key: ${{ runner.os }}-go-${{ hashFiles('sing-box/go.sum') }}
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
 
       - name: Get project dependencies
         run: go mod download
 
-      - name: Setup Android NDK (для Android)
+      - name: Setup Android NDK (только для Android)
         if: matrix.os == 'android'
         uses: nttld/setup-ndk@v1
         with:
@@ -140,7 +134,7 @@ jobs:
           CGO_ENABLED=0 \
             go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o "../artifacts/${BINARY_NAME}" ./cmd/sing-box
+            -o "./artifacts/${BINARY_NAME}" ./cmd/sing-box
 
       - name: Build sing-box (Android)
         if: matrix.os == 'android'
@@ -157,7 +151,7 @@ jobs:
           CGO_ENABLED=1 \
             go build -v -trimpath -tags "$TAGS" \
             -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" \
-            -o "../artifacts/${BINARY_NAME}" ./cmd/sing-box
+            -o "./artifacts/${BINARY_NAME}" ./cmd/sing-box
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
