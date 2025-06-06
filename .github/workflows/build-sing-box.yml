@@ -1,0 +1,85 @@
+name: Build sing-box with custom tags
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Запуск каждый день в 00:00 UTC
+  workflow_dispatch:    # Ручной запуск
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+      - name: Create log directory
+        run: |
+          mkdir -p /tmp/sing-box-builds
+          echo "$(date): Starting check for new sing-box tags" >> /tmp/sing-box-builds/sing-box-builds.log
+
+      - name: Get latest tag from SagerNet/sing-box
+        id: get_tag
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
+          echo "Latest tag: $LATEST_TAG" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists in current repo
+        id: check_tag
+        run: |
+          TAG_EXISTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases | \
+            jq -r ".[] | select(.tag_name == \"${{ steps.get_tag.outputs.tag }}\") | .tag_name")
+          if [ -n "$TAG_EXISTS" ]; then
+            echo "Tag ${{ steps.get_tag.outputs.tag }} already exists" >> /tmp/sing-box-builds/sing-box-builds.log
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "New tag ${{ steps.get_tag.outputs.tag }} found" >> /tmp/sing-box-builds/sing-box-builds.log
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clone SagerNet/sing-box
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git clone --depth 1 --branch ${{ steps.get_tag.outputs.tag }} https://github.com/SagerNet/sing-box.git
+          echo "$(date): Cloned SagerNet/sing-box at tag ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
+
+      - name: Set up Go
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.24.3'  # Версия Go из оригинального воркфлоу
+
+      - name: Build sing-box
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          cd sing-box
+          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
+          VERSION="${{ steps.get_tag.outputs.tag }}-for-A-zuro"
+          BINARY_NAME="sing-box_${{ matrix.goos }}_${{ matrix.goarch }}"
+          go build -v -trimpath -tags "$TAGS" -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" -o "../$BINARY_NAME" ./cmd/sing-box
+          echo "$(date): Built $BINARY_NAME for tag ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+
+      - name: Create release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: sing-box ${{ steps.get_tag.outputs.tag }}
+          files: |
+            sing-box_linux_amd64
+            sing-box_linux_arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save logs
+        if: always()
+        run: |
+          echo "$(date): Completed workflow run" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo >> /tmp/sing-box-builds/sing-box-builds.log
+          cat /tmp/sing-box-builds/sing-box-builds.log >> ${{ github.workspace }}/sing-box-builds.log
