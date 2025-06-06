@@ -98,7 +98,6 @@ jobs:
           }
 
       - name: Cache Go modules
-        if: matrix.os != 'darwin'
         uses: actions/cache@v4
         with:
           path: |
@@ -110,15 +109,13 @@ jobs:
 
       - name: Download dependencies
         run: go mod download
-
+      
       - name: Build sing-box
+        if: matrix.os != 'windows'
         run: |
-          TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
+          TAGS="with_gvisor,with_quic,with_dhcp,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
           BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            BINARY_NAME="${BINARY_NAME}.exe"
-          fi
           mkdir -p artifacts
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
           GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
