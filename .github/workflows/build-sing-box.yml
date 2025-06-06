@@ -22,10 +22,6 @@ on:
       - main-next
       - dev-next
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.build }}
-  cancel-in-progress: true
-
 jobs:
   calculate_version:
     name: Calculate version
@@ -51,8 +47,7 @@ jobs:
       - name: Calculate version (если не workflow_dispatch)
         if: github.event_name != 'workflow_dispatch'
         run: |
-          # Пример: скрипт, который внутри проекта вычисляет версию:
-          go run ./cmd/internal/read_tag --ci --nightly > calculated.txt
+          go run sing-box/cmd/internal/read_tag --ci --nightly > calculated.txt
           echo "version=$(cat calculated.txt)" >> "$GITHUB_ENV"
 
       - name: Set outputs
@@ -92,8 +87,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
-        # Убираем "./sing-box" — go.mod лежит в корне
-        working-directory: .
+        # Указываем, что go.mod находится в папке sing-box
+        working-directory: sing-box
 
     steps:
       - name: Checkout
@@ -106,13 +101,14 @@ jobs:
         with:
           go-version: '1.24.x'
 
-      - name: Cache Go modules 
+      - name: Cache Go modules
         uses: actions/cache@v3
         with:
           path: |
             ~/.cache/go-build
             ~/.modcache
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          # Ключ берётся по сумме файлов sing-box/go.sum
+          key: ${{ runner.os }}-go-${{ hashFiles('sing-box/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
 
