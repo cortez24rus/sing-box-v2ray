@@ -16,13 +16,13 @@ jobs:
       - name: Create log directory
         run: |
           mkdir -p /tmp/sing-box-builds
-          echo "$(date): Starting check for new sing-box tags" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "$(date): Начинаем проверку новых тегов sing-box" >> /tmp/sing-box-builds/sing-box-builds.log
 
       - name: Get latest tag from SagerNet/sing-box
         id: get_tag
         run: |
           LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
-          echo "Latest tag: $LATEST_TAG" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "Последний тег: $LATEST_TAG" >> /tmp/sing-box-builds/sing-box-builds.log
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Check if tag exists in current repo
@@ -32,10 +32,10 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/releases | \
             jq -r ".[] | select(.tag_name == \"${{ steps.get_tag.outputs.tag }}\") | .tag_name")
           if [ -n "$TAG_EXISTS" ]; then
-            echo "Tag ${{ steps.get_tag.outputs.tag }} already exists" >> /tmp/sing-box-builds/sing-box-builds.log
+            echo "Тег ${{ steps.get_tag.outputs.tag }} уже существует" >> /tmp/sing-box-builds/sing-box-builds.log
             echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "New tag ${{ steps.get_tag.outputs.tag }} found" >> /tmp/sing-box-builds/sing-box-builds.log
+            echo "Найден новый тег ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -43,13 +43,22 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           git clone --depth 1 --branch ${{ steps.get_tag.outputs.tag }} https://github.com/SagerNet/sing-box.git
-          echo "$(date): Cloned SagerNet/sing-box at tag ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "$(date): Клонирован SagerNet/sing-box с тегом ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
 
       - name: Set up Go
         if: steps.check_tag.outputs.exists == 'false'
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.24.3'  # Версия Go из оригинального воркфлоу
+          go-version: '^1.24.3'
+          cache: true
+          cache-dependency-path: sing-box/go.sum
+
+      - name: Download dependencies
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          cd sing-box
+          go mod download
+          echo "$(date): Зависимости загружены" >> /tmp/sing-box-builds/sing-box-builds.log
 
       - name: Build sing-box
         if: steps.check_tag.outputs.exists == 'false'
@@ -59,7 +68,7 @@ jobs:
           VERSION="${{ steps.get_tag.outputs.tag }}-for-A-zuro"
           BINARY_NAME="sing-box_${{ matrix.goos }}_${{ matrix.goarch }}"
           go build -v -trimpath -tags "$TAGS" -ldflags "-s -buildid= -X 'github.com/sagernet/sing-box/constant.Version=$VERSION'" -o "../$BINARY_NAME" ./cmd/sing-box
-          echo "$(date): Built $BINARY_NAME for tag ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "$(date): Собран $BINARY_NAME для тега ${{ steps.get_tag.outputs.tag }}" >> /tmp/sing-box-builds/sing-box-builds.log
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -80,6 +89,6 @@ jobs:
       - name: Save logs
         if: always()
         run: |
-          echo "$(date): Completed workflow run" >> /tmp/sing-box-builds/sing-box-builds.log
+          echo "$(date): Завершён запуск воркфлоу" >> /tmp/sing-box-builds/sing-box-builds.log
           echo >> /tmp/sing-box-builds/sing-box-builds.log
           cat /tmp/sing-box-builds/sing-box-builds.log >> ${{ github.workspace }}/sing-box-builds.log
