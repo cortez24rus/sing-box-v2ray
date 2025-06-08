@@ -1,8 +1,8 @@
 name: Check and Build v2ray-stat
 
 on:
-  schedule:
-    - cron: '0 0 * * *' # Запуск каждый день в 00:00 UTC
+#  schedule:
+#    - cron: '0 0 * * *' # Запуск каждый день в 00:00 UTC
   workflow_dispatch: # Для ручного запуска
 
 jobs:
