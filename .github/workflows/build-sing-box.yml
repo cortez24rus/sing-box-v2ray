@@ -141,7 +141,7 @@ jobs:
         run: |
           TAGS="with_gvisor,with_quic,with_dhcp,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
-          BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}"
+          BINARY_NAME="sing-box-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p artifacts
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
           GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
@@ -156,7 +156,7 @@ jobs:
         run: |
           $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           $VERSION="${{ needs.calculate_version.outputs.version }}"
-          $BINARY_NAME="sing-box_${{ matrix.os }}_${{ matrix.arch }}.exe"
+          $BINARY_NAME="sing-box-${{ matrix.os }}-${{ matrix.arch }}.exe"
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $env:GOOS="${{ matrix.os }}"
           $env:GOARCH="${{ matrix.arch }}"
