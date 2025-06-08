@@ -190,11 +190,14 @@ jobs:
           ls -R artifacts
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
           name: ${{ needs.calculate_version.outputs.version }}
           files: artifacts/*/*
           fail_on_unmatched_files: false
+          replace-assets: true
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
