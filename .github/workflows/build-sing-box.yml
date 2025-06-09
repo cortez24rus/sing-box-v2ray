@@ -50,7 +50,6 @@ jobs:
           echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
           echo "$CHANGELOG" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-          echo $CHANGELOG
 
       - name: Check if tag already exists in THIS repo
         id: check_tag
@@ -150,6 +149,15 @@ jobs:
           TAGS="with_gvisor,with_quic,with_dhcp,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           VERSION="${{ needs.calculate_version.outputs.version }}"
           BINARY_NAME="sing-box-${{ matrix.os }}-${{ matrix.arch }}"
+          if [ "${{ matrix.go386 }}" != "" ]; then
+            BINARY_NAME="${BINARY_NAME}-${{ matrix.go386 }}"
+          fi
+          if [ "${{ matrix.goarm }}" != "" ]; then
+            BINARY_NAME="${BINARY_NAME}}v${{ matrix.goarm }}"
+          fi
+          if [ "${{ matrix.goarch_extra }}" != "" ]; then
+            BINARY_NAME="${BINARY_NAME}-${{ matrix.goarch_extra }}"
+          fi
           mkdir -p artifacts
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }} \
           GOMIPS=${{ matrix.goarch_extra }} GOMIPS64=${{ matrix.goarch_extra }} CGO_ENABLED=0 \
@@ -165,6 +173,15 @@ jobs:
           $TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_v2ray_api"
           $VERSION="${{ needs.calculate_version.outputs.version }}"
           $BINARY_NAME="sing-box-${{ matrix.os }}-${{ matrix.arch }}.exe"
+          if ("${{ matrix.go386 }}" -ne "") {
+            $BINARY_NAME="${BINARY_NAME%.exe}-${{ matrix.go386 }}.exe"
+          }
+          if ("${{ matrix.goarm }}" -ne "") {
+            $BINARY_NAME="${BINARY_NAME%.exe}v${{ matrix.goarm }}.exe"
+          }
+          if ("${{ matrix.goarch_extra }}" -ne "") {
+            $BINARY_NAME="${BINARY_NAME%.exe}-${{ matrix.goarch_extra }}.exe"
+          }
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $env:GOOS="${{ matrix.os }}"
           $env:GOARCH="${{ matrix.arch }}"
