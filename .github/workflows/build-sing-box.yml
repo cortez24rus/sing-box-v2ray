@@ -202,13 +202,15 @@ jobs:
           script: |
             const fs = require('fs').promises;
             const path = require('path');
+            
+            // Define variables from workflow outputs
             const version = '${{ needs.calculate_version.outputs.version }}';
             const tagName = `v${version}`;
             const releaseName = `Release v${version}`;
-            const body = `${{ needs.calculate_version.outputs.changelog }}`;
+            const body = '${{ needs.calculate_version.outputs.changelog }}';
             const artifactDir = 'artifacts';
-            
-            // Получить список файлов артефактов
+      
+            // Function to recursively get all artifact files
             async function getArtifactFiles(dir) {
               let files = [];
               const items = await fs.readdir(dir, { withFileTypes: true });
@@ -223,7 +225,7 @@ jobs:
               return files;
             }
 
-            // Создать релиз
+            // Create the release
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -231,10 +233,10 @@ jobs:
               name: releaseName,
               body: body,
               draft: false,
-              prerelease: ${tagName.includes('beta')},
+              prerelease: tagName.includes('beta')
             });
-
-            // Загрузить артефакты
+      
+            // Upload artifacts
             const files = await getArtifactFiles(artifactDir);
             for (const file of files) {
               console.log(`Uploading ${file}...`);
@@ -243,7 +245,7 @@ jobs:
                 repo: context.repo.repo,
                 release_id: release.data.id,
                 name: path.basename(file),
-                data: await fs.readFile(file),
+                data: await fs.readFile(file)
               });
             }
         env:
