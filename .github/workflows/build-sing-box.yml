@@ -203,14 +203,15 @@ jobs:
             const fs = require('fs').promises;
             const path = require('path');
             
-            // Define variables from workflow outputs
+            // Define variables with proper escaping
             const version = '${{ needs.calculate_version.outputs.version }}';
             const tagName = `v${version}`;
             const releaseName = `Release v${version}`;
-            const body = '${{ needs.calculate_version.outputs.changelog }}';
+            const body = ${{ toJson(needs.calculate_version.outputs.changelog) }}; // Safely escape changelog
+            
             const artifactDir = 'artifacts';
       
-            // Function to recursively get all artifact files
+            // Function to recursively get artifact files
             async function getArtifactFiles(dir) {
               let files = [];
               const items = await fs.readdir(dir, { withFileTypes: true });
@@ -224,7 +225,7 @@ jobs:
               }
               return files;
             }
-
+      
             // Create the release
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
