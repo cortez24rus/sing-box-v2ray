@@ -19,6 +19,7 @@ jobs:
     outputs:
       version: ${{ steps.set_version.outputs.version }}
       tag_exists: ${{ steps.check_tag.outputs.result }}
+      changelog: ${{ steps.extract_changelog.outputs.changelog }}
     steps:
       - name: Checkout SagerNet/sing-box
         uses: actions/checkout@v4
@@ -42,6 +43,20 @@ jobs:
         id: set_version
         run: |
           echo "version=${{ steps.get_tag.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog
+        id: extract_changelog
+        run: |
+          VERSION=${{ steps.get_tag.outputs.version }}
+          CHANGELOG_PATH="docs/CHANGELOG.md"
+          SECTION=$(awk -v ver="${VERSION}" '
+            $0 ~ "## [" ver "] -" {flag=1; print; next}
+            flag && /^## / {flag=0}
+            flag {print}
+          ' "${CHANGELOG_PATH}")
+          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$SECTION" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag already exists in THIS repo
         id: check_tag
@@ -194,6 +209,7 @@ jobs:
         with:
           tag_name: v${{ needs.calculate_version.outputs.version }}
           name: ${{ needs.calculate_version.outputs.version }}
+          body: ${{ needs.calculate_version.outputs.changelog }}
           files: artifacts/*/*
           fail_on_unmatched_files: false
           draft: false
