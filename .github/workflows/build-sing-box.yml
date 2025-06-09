@@ -17,7 +17,7 @@ jobs:
     name: Calculate version
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.set_version.outputs.version }}
+      version: ${{ steps.get_tag.outputs.version }}
       tag_exists: ${{ steps.check_tag.outputs.result }}
       changelog: ${{ steps.extract_changelog.outputs.changelog }}
     steps:
@@ -39,46 +39,38 @@ jobs:
           echo "Latest tag is: $LATEST_TAG"
           echo "version=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Set outputs
-        id: set_version
-        run: |
-          echo "version=${{ steps.get_tag.outputs.version }}" >> "$GITHUB_OUTPUT"
-
-      - name: Extract changelog
+      - name: Extract changelog from GitHub release
         id: extract_changelog
         run: |
           VERSION=${{ steps.get_tag.outputs.version }}
-          CHANGELOG_PATH="docs/CHANGELOG.md"
-          SECTION=$(awk -v ver="${VERSION}" '
-            $0 ~ "## [" ver "] -" {flag=1; print; next}
-            flag && /^## / {flag=0}
-            flag {print}
-          ' "${CHANGELOG_PATH}")
+          TAG="v${VERSION}"
+          CHANGELOG=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/SagerNet/sing-box/releases/tags/${TAG}" | \
+            jq -r '.body // "No changelog available"')
           echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$SECTION" >> "$GITHUB_OUTPUT"
+          echo "$CHANGELOG" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag already exists in THIS repo
         id: check_tag
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
             const version = '${{ steps.get_tag.outputs.version }}';
             const tagName = `v${version}`;
             try {
-              // Пытаемся получить refs/tags/v<version> в текущем репо
               await github.rest.git.getRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: `tags/${tagName}`
               });
-              return 'true';   // нашли такой тег
+              return 'true';
             } catch (err) {
               if (err.status === 404) {
-                return 'false';  // нет такого тега, можно релизить
+                return 'false';
               }
-              throw err;         // прочие ошибки пробрасываем дальше
+              throw err;
             }
 
   build:
@@ -150,7 +142,7 @@ jobs:
 
       - name: Download dependencies
         run: go mod download
-      
+
       - name: Build sing-box
         if: matrix.os != 'windows'
         run: |
@@ -205,14 +197,54 @@ jobs:
           ls -R artifacts
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: actions/github-script@v7
         with:
-          tag_name: v${{ needs.calculate_version.outputs.version }}
-          name: ${{ needs.calculate_version.outputs.version }}
-          body: ${{ needs.calculate_version.outputs.changelog }}
-          files: artifacts/*/*
-          fail_on_unmatched_files: false
-          draft: false
-          prerelease: false
+          script: |
+            const fs = require('fs').promises;
+            const path = require('path');
+            const version = '${{ needs.calculate_version.outputs.version }}';
+            const tagName = `v${version}`;
+            const releaseName = `Release v${version}`;
+            const body = `${{ needs.calculate_version.outputs.changelog }}`;
+            const artifactDir = 'artifacts';
+            
+            // Получить список файлов артефактов
+            async function getArtifactFiles(dir) {
+              let files = [];
+              const items = await fs.readdir(dir, { withFileTypes: true });
+              for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                if (item.isDirectory()) {
+                  files = files.concat(await getArtifactFiles(fullPath));
+                } else {
+                  files.push(fullPath);
+                }
+              }
+              return files;
+            }
+
+            // Создать релиз
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: releaseName,
+              body: body,
+              draft: false,
+              prerelease: ${tagName.includes('beta')},
+            });
+
+            // Загрузить артефакты
+            const files = await getArtifactFiles(artifactDir);
+            for (const file of files) {
+              console.log(`Uploading ${file}...`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name: path.basename(file),
+                data: await fs.readFile(file),
+              });
+            }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
