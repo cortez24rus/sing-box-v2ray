@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 */12 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.build }}
@@ -224,7 +224,7 @@ jobs:
             // Define variables with proper escaping
             const version = '${{ needs.calculate_version.outputs.version }}';
             const tagName = `v${version}`;
-            const releaseName = `Release v${version}`;
+            const releaseName = `v${version}`;
             const body = ${{ toJson(needs.calculate_version.outputs.changelog) }}; // Safely escape changelog
             
             const artifactDir = 'artifacts';
