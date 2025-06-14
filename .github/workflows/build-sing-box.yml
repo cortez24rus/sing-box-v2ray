@@ -224,7 +224,7 @@ jobs:
             // Define variables with proper escaping
             const version = '${{ needs.calculate_version.outputs.version }}';
             const tagName = `v${version}`;
-            const releaseName = `v${version}`;
+            const releaseName = `${version}`;
             const body = ${{ toJson(needs.calculate_version.outputs.changelog) }}; // Safely escape changelog
             
             const artifactDir = 'artifacts';
